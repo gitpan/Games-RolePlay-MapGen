@@ -1,0 +1,80 @@
+0.26:  Mon Apr  4 11:17:19 EDT 2005
+   - jettero renamed Visualizations ----> Exporters
+
+0.25:  Sat Apr  2 18:47:05 EST 2005
+   - jettero did half of the little door-open-arc-lines
+     things ... they're more work than you'd think.
+
+0.24:  Sat Apr  2 12:41:34 EST 2005
+   - jettero am prepared to draw doors with secrets and
+     locks -- including the direction they open, but he
+     needs to go shopping for a tiny refigerator. The big
+     one borked you see. Grrr.
+
+0.23:  Sat Apr  2 12:30:36 EST 2005
+   - jettero drew the doors (in a preliminary way)
+
+0.21:  Sat Apr  2 10:26:39 EST 2005
+   - jettero made a preliminary door generator
+
+0.20:  Sat Apr  2  7:15:32 EST 2005
+   - jettero redid the options passing in various
+     complicated ways
+
+0.19:  Wed Mar 30 11:56:07 EST 2005
+   - jettero added save_load and appropriate tests
+
+0.18:  Wed Mar 30 10:39:38 EST 2005
+   - jettero improved the irange tests... it was behaving
+     statistically stupidly and the tests missed it
+
+0.17:  Mon Mar 28 08:58:07 EST 2005
+   - jettero fixed the in-room tick marks
+
+0.16:  Sun Mar 27 07:53:48 EST 2005
+   - jettero started a cool door generator
+
+0.15:  Sun Mar 27 07:53:41 EST 2005
+   - jettero cleaned up the in-room-tick-marks
+
+0.14:  Fri Mar 25 16:20:02 EST 2005
+   - jettero further broke up the generators. Now only my
+     room dropping code will be in Basic.
+
+0.13:  Fri Mar 25 16:19:43 EST 2005
+   - jettero drestroyed many nonsensical leading underscores
+     on things that shouldn't have ever had them.
+
+0.09:  Fri Mar 25 14:42:56 EST 2005
+   - jettero just got a note from Jamis Buck -- an answer to
+     a question actually. He officially approves of my
+     project. Perhaps it's better to say he doesn't
+     disapprove. Whatever. Thanks Jamis!
+
+0.08:  Fri Mar 25 14:41:46 EST 2005
+   - jettero began working on the dead-end remover, but it
+     appears to have some bugs
+
+0.07:  Fri Mar 25 10:30:15 EST 2005
+   - jettero split up the generator further and added the
+     sparseness code
+
+0.06:  Thu Mar 24 11:50:57 EST 2005
+   - jettero started a GD visualization object
+
+0.05:  Thu Mar 24 11:38:11 EST 2005
+   - jettero finished the perfect maze algorithm from Jemis'
+     website.
+
+0.04:  Thu Mar 24 11:08:46 EST 2005
+   - jettero created a room dropper... but he needs to quick
+     adapt the perfect maze algorithm before he can use it
+
+0.03:  Sun Mar 20 08:26:58 EST 2005
+   - jettero added a huge test suite for the Tools.pm
+
+0.02:  Sun Mar 20 08:26:16 EST 2005
+   - jettero added the Tools.pm module
+
+0.01:  Wed Jan 12 15:12:24 EST 2005
+   - jettero made this
