@@ -1,4 +1,4 @@
-# $Id: MapGen.pm,v 1.56 2005/04/05 15:05:21 jettero Exp $
+# $Id: MapGen.pm,v 1.61 2006/08/30 18:22:44 jettero Exp $
 # vi:tw=0 syntax=perl:
 
 package Games::RolePlay::MapGen;
@@ -8,7 +8,7 @@ use AutoLoader;
 use Carp;
 use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::SortKeys = 1;
 
-our $VERSION = "0.26";
+our $VERSION = "0.29";
 our $AUTOLOAD;
 
 our %opp = (n=>"s", e=>"w", s=>"n", w=>"e");
@@ -18,7 +18,7 @@ our %known_opts = (
     generator              => "Basic",
     exporter               => "Text",
     bounding_box           => "50x50",
-    tile_size              => "10 ft",
+    tile_size              => 10,
     cell_size              => "20x20",
 
     num_rooms              => "1d4+1",
@@ -187,8 +187,15 @@ sub generate {
 
     __MADE_GEN_OBJ:
     if( my $gen = $this->{objs}{generator} ) {
+        my $new_opts;
 
-        ($this->{_the_map}, $this->{_the_groups}) = $gen->go( @_ );
+        ($this->{_the_map}, $this->{_the_groups}, $new_opts) = $gen->go( @_ );
+
+        if( $new_opts and keys %$new_opts ) {
+            for my $k (keys %$new_opts) {
+                $this->{$k} = $new_opts->{$k};
+            }
+        }
 
         return;
 
