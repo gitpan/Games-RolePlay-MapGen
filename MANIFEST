@@ -2,7 +2,6 @@ MapGen.dtd
 MapGen.pm
 MapGen.xsl
 README
-META.yml
 Changes
 Makefile.PL
 MANIFEST
@@ -24,3 +23,6 @@ MapGen/Generator.pm
 MapGen/Exporter/Text.pm
 MapGen/Exporter/BasicImage.pm
 MapGen/Exporter/XML.pm
+MapGen/Generator/OneBigRoom.pm
+META.yml
+t/09_xml_export_import.t

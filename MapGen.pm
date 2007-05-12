@@ -7,7 +7,7 @@ use AutoLoader;
 use Carp;
 use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::SortKeys = 1;
 
-our $VERSION = "0.29.3";
+our $VERSION = "0.31.0";
 our $AUTOLOAD;
 
 our %opp = (n=>"s", e=>"w", s=>"n", w=>"e");
@@ -90,6 +90,9 @@ sub AUTOLOAD {
     my $this = shift;
     my $sub  = $AUTOLOAD;
 
+    # sub set_generator
+    # sub set_exporter
+
     if( $sub =~ m/MapGen\:\:set_(generator|exporter)$/ ) {
         my $type = $1;
         my $modu = shift;
@@ -155,10 +158,10 @@ sub save_map {
 
     my @keys = keys %$this;
 
-    open _SAVE, ">$filename" or die "couldn't open $filename for write: $!";
-    print _SAVE "#!/usr/bin/perl\n\n";
-    print _SAVE Data::Dumper->Dump([map($this->{$_}, @keys)], [map("\$this\-\>{$_}", @keys)]);
-    close _SAVE;
+    open my $save, ">$filename" or die "couldn't open $filename for write: $!";
+    print $save "#!/usr/bin/perl\n\n";
+    print $save Data::Dumper->Dump([map($this->{$_}, @keys)], [map("\$this\-\>{$_}", @keys)]);
+    close $save;
 
     $this->{_the_map}->interconnect_map;
 }
@@ -168,9 +171,10 @@ sub load_map {
     my $this     = shift;
     my $filename = shift;
 
-    open _LOAD, "$filename" or die "couldn't open $filename for read: $!";
-    my $entire_file = join("", <_LOAD>);
-    close _LOAD;
+    open my $load, "$filename" or die "couldn't open $filename for read: $!";
+    local $/ = undef;
+    my $entire_file = <$load>;
+    close $load;
 
     eval $entire_file;
     die "ERROR while evaluating saved map: $@" if $@;

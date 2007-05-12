@@ -1,12 +1,13 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Games-RolePlay-MapGen
-version:      0.29.3
+version:      0.31.0
 version_from: MapGen.pm
 installdirs:  site
 requires:
     Tie::IxHash:                   0
     XML::Simple:                   0
+    XML::XPath:                    0
 
 distribution_type: module
 generated_by: ExtUtils::MakeMaker version 6.30
