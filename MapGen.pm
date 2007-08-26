@@ -7,10 +7,11 @@ use AutoLoader;
 use Carp;
 use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::SortKeys = 1;
 
-our $VERSION = "1.0.1";
+our $VERSION = "1.0.2";
 our $AUTOLOAD;
 
-our %opp = (n=>"s", e=>"w", s=>"n", w=>"e");
+our %opp  = (n=>"s", e=>"w", s=>"n", w=>"e");
+our %full = (n=>"north", e=>"east", s=>"south", w=>"west");
 
 # known_opts {{{
 our %known_opts = (
@@ -290,61 +291,4 @@ sub size {
 # }}}
 
 __END__
-# Below is stub documentation for your module. You better edit it!
 
-=head1 NAME
-
-Games::RolePlay::MapGen - The base object for generating dungeons and maps
-
-=head1 SYNOPSIS
-
-    use Games::RolePlay::MapGen;
-
-    $map->set_generator("Basic");             # This is actually the default generator,
-    $map->add_generator_plugin("BasicDoors"); # however, you must add the doors.
-    generate $map("map.txt");                 # It'll generate a text map by default.
-
-    $map->set_exporter( "BasicImage" );       # But a graphical map is probably more useful.
-    export $map("map.png");
-
-=head1 AUTHOR
-
-Jettero Heller <japh@voltar-confed.org>
-
-Jet is using this software in his own projects...
-If you find bugs, please please please let him know. :)
-
-Actually, let him know if you find it handy at all.
-Half the fun of releasing this stuff is knowing 
-that people use it.
-
-=head1 Special Thanks to Jamis Buck
-
-I emailed Jamis and asked for permission to duplicate the text of portions
-of his "Random Dungeon Design: The Secret Workings of Jamis Buck's Dungeon
-Generator" document (http://www.aarg.net/~minam/dungeon_design.html) and he
-was cool with that.
-
-Really, without his work, I never would have written this module!
-
-=head1 COPYRIGHT
-
-GPL!  I included a gpl.txt for your reading enjoyment.
-
-Though, additionally, I will say that I'll be tickled if you were to
-include this package in any commercial endeavor.  Also, any thoughts to
-the effect that using this module will somehow make your commercial
-package GPL should be washed away.
-
-I hereby release you from any such silly conditions.
-
-This package and any modifications you make to it must remain GPL.  Any
-programs you (or your company) write shall remain yours (and under
-whatever copyright you choose) even if you use this package's intended
-and/or exported interfaces in them.
-
-=head1 SEE ALSO
-
-perl(1)
-
-=cut
