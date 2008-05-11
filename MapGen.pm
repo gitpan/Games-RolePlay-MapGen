@@ -7,7 +7,7 @@ use AutoLoader;
 use Carp;
 use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::SortKeys = 1;
 
-our $VERSION = "1.0.2";
+our $VERSION = "1.2.0";
 our $AUTOLOAD;
 
 our %opp  = (n=>"s", e=>"w", s=>"n", w=>"e");
@@ -141,7 +141,7 @@ sub DESTROY {}
 sub new {
     my $class = shift;
     my @opts  = @_;
-    my $opts  = ( (@opts == 1 and ref($opts[0]) eq "HASH") ? $opts[0] : {@opts} );
+    my $opts  = ( (@opts == 1 and ref($opts[0]) eq "HASH") ? {%{$opts[0]}} : {@opts} );
     my $this  = bless $opts, $class;
 
     if( my $e = $this->_check_opts ) { croak $e }
@@ -159,7 +159,7 @@ sub save_map {
 
     my @keys = keys %$this;
 
-    open my $save, ">$filename" or die "couldn't open $filename for write: $!";
+    open my $save, ">$filename" or croak "couldn't open $filename for write: $!";
     print $save "#!/usr/bin/perl\n\n";
     print $save Data::Dumper->Dump([map($this->{$_}, @keys)], [map("\$this\-\>{$_}", @keys)]);
     close $save;
@@ -272,7 +272,7 @@ sub import_xml {
     $this = $this->new unless ref $this;
 
     $this->set_generator( "XMLImport" );
-    $this->generate( xml_input_file => $that ); 
+    $this->generate( xml_input_file => $that, @_ ); 
 
     $this;
 }

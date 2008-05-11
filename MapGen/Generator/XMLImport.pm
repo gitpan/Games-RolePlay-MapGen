@@ -44,6 +44,7 @@ sub genmap {
 
     my $maprows = $xp->find('/MapGen/map/row');
     for my $row ($maprows->get_nodelist) {
+
         my $a = []; push @$map, $a;
         my $y_pos = $xp->findvalue( '@ypos' => $row )->value;
 
@@ -51,6 +52,8 @@ sub genmap {
         for my $tile ($mapcols->get_nodelist) {
             my $x_pos = $xp->findvalue( '@xpos' => $tile )->value;
             my $type  = $xp->findvalue( '@type' => $tile )->value;
+
+            $opts->{t_cb}->() if exists $opts->{t_cb};
 
             my $t = &_tile( x=>$x_pos, y=>$y_pos );
 
@@ -88,6 +91,7 @@ sub genmap {
                         my $d_locked = ($xp->findvalue( '@locked' => $closure ) eq "yes" ? 1:0);
                         my $d_stuck  = ($xp->findvalue( '@stuck'  => $closure ) eq "yes" ? 1:0);
                         my $d_secret = ($xp->findvalue( '@secret' => $closure ) eq "yes" ? 1:0);
+                        my $d_open   = ($xp->findvalue( '@open'   => $closure ) eq "yes" ? 1:0);
                         my $d_majod  = substr $xp->findvalue( '@major_open_dir' => $closure ), 0, 1;
                         my $d_minod  = substr $xp->findvalue( '@minor_open_dir' => $closure ), 0, 1;
 
@@ -95,6 +99,7 @@ sub genmap {
                             locked => $d_locked,
                             stuck  => $d_stuck,
                             secret => $d_secret,
+                            'open' => $d_open,
                             open_dir => {
                                 major => $d_majod,
                                 minor => $d_minod,
@@ -114,26 +119,17 @@ sub genmap {
         my $t_name = $xp->findvalue( '@name' => $tile_group )->value;
         my $t_type = $xp->findvalue( '@type' => $tile_group )->value;
 
-        my @t_loc  = split /,/, $xp->findvalue( '@loc' => $tile_group );
-        my @t_size = split /x/, $xp->findvalue( '@size' => $tile_group );
-
         my $group = &_group;
-           $group->{name}     = $t_name;
-           $group->{loc_size} = "$t_size[0]x$t_size[1] ($t_loc[0], $t_loc[1])";
-           $group->{type}     = $t_type;
-           $group->{size}     = \@t_size;
-           $group->{loc}      = \@t_loc;
+           $group->name( $t_name );
+           $group->type( $t_type );
 
-        my $xmin = $t_loc[0];
-        my $ymin = $t_loc[1];
-        my $xmax = $xmin + $t_size[0]-1;
-        my $ymax = $ymin + $t_size[1]-1;
+        my $rectangles = $tile_group->find('rectangle');
+        for my $rec ($rectangles->get_nodelist) {
+            my @r_loc  = split m/,/, $xp->findvalue( '@loc' => $rec );
+            my @r_size = split m/x/, $xp->findvalue( '@size' => $rec );
 
-        for my $x ( $xmin .. $xmax ) {
-        for my $y ( $ymin .. $ymax ) {
-            my $tile = $map->[$y][$x];
-               $tile->{group} = $group;
-        }}
+            $group->add_rectangle(\@r_loc, \@r_size, $map);
+        }
 
         push @$groups, $group;
     }

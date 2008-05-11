@@ -1,6 +1,33 @@
 # vi:tw=0 syntax=perl:
 
 # package ::_interconnected_map {{{
+package Games::RolePlay::MapGen::_disallow_autoviv;
+
+use strict;
+use Tie::Array;
+use base 'Tie::StdArray';
+use Carp;
+
+1;
+
+sub TIEARRAY {
+    my $class = shift;
+    my $this  = bless [], $class;
+    my $that  = shift;
+
+    @$this = @$that;
+
+    $this;
+}
+
+sub FETCH {
+    my $this = shift;
+    
+    croak "autovivifing new rows and columns is disabled ($_[0]>$#$this)" if $_[0] > $#$this;
+
+    $this->SUPER::FETCH(@_);
+}
+
 package Games::RolePlay::MapGen::_interconnected_map;
 
 use strict;
@@ -13,6 +40,8 @@ sub interconnect_map {
     my $map = shift;
 
     # This interconnected array stuff is _REALLY_ handy, but it needs to be cleaned up, so it gets it's own class
+
+    tie @$_, "Games::RolePlay::MapGen::_disallow_autoviv", $_ for $map, @$map;
 
     for my $i (0 .. $#$map) {
         my $jend = $#{ $map->[$i] };
@@ -48,17 +77,34 @@ sub interconnect_map {
 sub disconnect_map {
     my $map = shift;
 
-    for my $i (0 .. $#$map) {
-        my $jend = $#{ $map->[$i] };
 
-        for my $j (0 .. $jend) {
-            # Destroying the map wouldn't destroy the tiles if they're self
-            # referencing like this.  That's not a problem because of the
-            # global destructor, *whew*; except that each new map generated,
-            # until perl exits, would eat up more memory.  
+    eval {
+        untie @$_ for grep {tied $_} @$map;
+        untie @$map if tied $map;
 
-            delete $map->[$i][$j]{nb}; # So we have to break the self-refs here.
+        for my $i (0 .. $#$map) {
+            my $jend = $#{ $map->[$i] };
+
+            for my $j (0 .. $jend) {
+                # Destroying the map wouldn't destroy the tiles if they're self
+                # referencing like this.  That's not a problem because of the
+                # global destructor, *whew*; except that each new map generated,
+                # until perl exits, would eat up more memory.  
+
+                delete $map->[$i][$j]{nb}; # So we have to break the self-refs here.
+            }
         }
+    };
+
+    if( $@ ) {
+        # NOTE: The above emits a fatal under global destruction for some
+        # reason, probably the bless+tie gets cleaned up in the wrong order or
+        # something.  It doesn't really matter since we're already exiting perl
+        # anyway.  This assumption may be false under win32, where it may
+        # create a memory leak.  Does windows clean up when a process exits?
+        # It really aught to, but I have my doubts.
+
+        die $@ unless $@ =~ m/global destruction/;
     }
 
     # You can test to make sure the tiles are dying when a map goes out of
@@ -98,7 +144,158 @@ use strict;
 
 1;
 
-sub new { my $class = shift; bless {@_}, $class }
+# new {{{
+sub new {
+    my $class = shift;
+    my $this  = bless {name=>"?", type=>"?", loc=>[], size=>[], loc_size=>"n/a"}, $class;
+
+    if( @_ ) {
+        my $h = {@_};
+        $this->{name} = $h->{name} if exists $h->{name};
+        $this->{type} = $h->{type} if exists $h->{type};
+    }
+
+    $this
+}
+# }}}
+# name {{{
+sub name {
+    my $this = shift;
+       $this->{name} = $_[0] if @_;
+
+    $this->{name};
+}
+# }}}
+# type {{{
+sub type {
+    my $this = shift;
+       $this->{type} = $_[0] if @_;
+
+    $this->{type};
+}
+# }}}
+# desc {{{
+sub desc {
+    my $this = shift;
+
+    $this->{loc_size};
+}
+# }}}
+# add_rectangle {{{
+sub add_rectangle {
+    my $this = shift;
+    my $loc  = shift;
+    my $size = shift;
+    my $mapo = shift;
+
+    if( $loc and $size ) {
+        push @{$this->{loc}},  $loc;
+        push @{$this->{size}}, $size;
+    }
+
+    my @i = map  { $_->[0] }
+            sort { $b->[1]<=>$a->[2] }
+            map  { my $t = $this->{size}[$_]; [$_, $t->[0]*$t->[1]] }
+            0 .. $#{$this->{loc}};
+
+    my @to_kill; # remove these, they don't say anything
+    my %points;  # don't count the same tiles over and over
+    my $sloc    = [0,0];
+    my $mloc    = [@{$this->{loc}[0]}];
+    my $Mloc    = [@{$this->{loc}[0]}];
+    my $nloc    = 0;
+    for my $i (@i) {
+        my $l = $this->{loc}[$i];
+        my $s = $this->{size}[$i];
+
+        my $x = $l->[0];
+        my $y = $l->[1];
+
+        my $i_count = 0;
+
+        for my $xi (0 .. $s->[0]-1) {
+        for my $yi (0 .. $s->[1]-1) {
+            my $xc = $x + $xi;
+            my $yc = $y + $yi;
+
+            unless( $points{$xc}{$yc} ) {
+                $points{$xc}{$yc} = 1;
+                $i_count ++;
+
+                $sloc->[0] += $xc;
+                $sloc->[1] += $yc;
+                $nloc ++;
+
+                $mloc->[0] = $xc if $xc < $mloc->[0];
+                $mloc->[1] = $yc if $yc < $mloc->[1];
+                $Mloc->[0] = $xc if $xc > $Mloc->[0];
+                $Mloc->[1] = $yc if $yc > $Mloc->[1];
+
+                $mapo->[ $yc ][ $xc ]{group} = $this if $mapo;
+            }
+
+        }}
+
+        push @to_kill, $i unless $i_count>0;
+    }
+
+    for my $kill (sort {$b<=>$a} @to_kill) {
+        splice @{$this->{loc}},  $kill, 0;
+        splice @{$this->{size}}, $kill, 0;
+    }
+
+    my $cloc = [0,0]; 
+       $cloc = [ int($sloc->[0]/$nloc),  int($sloc->[1]/$nloc) ] if $nloc > 0;
+
+    my $extent = [ $Mloc->[0]-$mloc->[0]+1, $Mloc->[1]-$mloc->[1]+1 ];
+
+    $this->{loc_size} = "($cloc->[0], $cloc->[1]) $extent->[0]x$extent->[1]";
+    $this->{extents}  = [ @$mloc, @$Mloc ];
+}
+# }}}
+# enumerate_tiles {{{
+sub enumerate_tiles {
+    my $this = shift;
+
+    my @i = map  { $_->[0] }
+            sort { $b->[1]<=>$a->[2] }
+            map  { my $t = $this->{size}[$_]; [$_, $t->[0]*$t->[1]] }
+            0 .. $#{$this->{loc}};
+
+    my @ret;
+    my %points;  # don't count the same tiles over and over
+    for my $i (@i) {
+        my $l = $this->{loc}[$i];
+        my $s = $this->{size}[$i];
+
+        my $x = $l->[0];
+        my $y = $l->[1];
+
+        for my $xi (0 .. $s->[0]-1) {
+        for my $yi (0 .. $s->[1]-1) {
+            my $xc = $x + $xi;
+            my $yc = $y + $yi;
+
+            unless( $points{$xc}{$yc} ) {
+                $points{$xc}{$yc} = 1;
+
+                push @ret, [$xc,$yc];
+            }
+
+        }}
+    }
+
+    @ret;
+}
+# }}}
+# enumerate_extents {{{
+sub enumerate_extents {
+    my $this = shift;
+
+    @{ $this->{extents} };
+}
+# }}}
+
 # }}}
 # package ::_tile; {{{
 package Games::RolePlay::MapGen::_tile;
@@ -274,11 +471,46 @@ Games::RolePlay::MapGen::Tools - Some support tools and objects for the mapgen s
 At this time, the ::_group object is just a blessed hash that contains some
 variables that need to be set by the ::Generator objects.
 
-    $group->{name}     = "Room #$rn";
-    $group->{loc_size} = "$size[0]x$size[1] ($spot[0], $spot[1])";
-    $group->{type}     = "room";
-    $group->{size}     = [@size];
-    $group->{loc}      = [@spot];
+   ## 1.0.3 ## $group->{name}     = "Room #$rn";
+   ## 1.0.3 ## $group->{loc_size} = "$size[0]x$size[1] ($spot[0], $spot[1])";
+   ## 1.0.3 ## $group->{type}     = "room";
+   ## 1.0.3 ## $group->{size}     = [@size];
+   ## 1.0.3 ## $group->{loc}      = [@spot];
+
+   # Starting with 1.1.0, rooms can have irregular shapes made up of
+   # rectangles.  The rectangles start at @start = @{$group->{loc}[$i]} and
+   # have @size = @{$group->{size}[$i]}.
+
+   $group->{name} = "Room #$rn";
+   $group->{type} = "room";
+   $group->{loc}  = [\@spot, \@another_spot, ...];
+   $group->{size} = [\@size, \@another_size, ...];
+
+   # The loc_size description became problematic in 1.1.x.  It will now
+   # indicate the maximum extent (x-diff x y-diff) and the "center of mass"
+   # (average location).
+
+   $group->{loc_size} = "($center[0], $center[1]) $extent[0]x$extent[1]";
+
+   Happily, there is a new method to add a rectangle that does all the work:
+
+   $group->add_rectangle(\@loc, \@size);
+
+   If you pass the map object, it will mark the appropriate tiles its $self
+
+   $group->add_rectangle(\@loc, \@size, $the_map);
+    # marks $mapo->[ $y ][ $x ]{group} = $group;
+    # (can be called without arguments to recalculate {loc_size})
+
+   # There is also a new $group->{extents}, which describes the min and max
+   # locations.  They are really only useful for truely rectangular rooms.
+
+   # These new methods can be used to access the group's tiles and extents:
+   my @tiles   = $group->enumerate_tiles;
+   my @extents = $group->enumerate_extents;
+
+   # lastly,
+   my $desc = $group->desc; # returns the {loc_size} calculated by add_rectangle
 
 =head1 Games::RolePlay::MapGen::_tile
 
@@ -329,19 +561,10 @@ that people use it.
 
 =head1 COPYRIGHT
 
-GPL!  I included a gpl.txt for your reading enjoyment.
+Copyright (c) 2008 Paul Miller -- LGPL [Software::License::LGPL_2_1]
 
-Though, additionally, I will say that I'll be tickled if you were to
-include this package in any commercial endeavor.  Also, any thoughts to
-the effect that using this module will somehow make your commercial
-package GPL should be washed away.
-
-I hereby release you from any such silly conditions.
-
-This package and any modifications you make to it must remain GPL.  Any
-programs you (or your company) write shall remain yours (and under
-whatever copyright you choose) even if you use this package's intended
-and/or exported interfaces in them.
+    perl -MSoftware::License::LGPL_2_1 -e '$l = Software::License::LGPL_2_1->new({holder=>"Paul Miller"});
+          print $l->fulltext' | less
 
 =head1 SEE ALSO
 

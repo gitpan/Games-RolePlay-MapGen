@@ -5,7 +5,7 @@ package Games::RolePlay::MapGen::Generator::OneBigRoom;
 use strict;
 use Carp;
 use base qw(Games::RolePlay::MapGen::Generator);
-use Games::RolePlay::MapGen::Tools qw( _group _tile choice roll );
+use Games::RolePlay::MapGen::Tools qw( _group _tile );
 
 1;
 
@@ -18,6 +18,8 @@ sub create_tiles {
         my $a = [];
 
         for my $j (0 .. $opts->{x_size}-1) {
+            $opts->{t_cb}->() if exists $opts->{t_cb};
+
             push @$a, &_tile(x=>$j, y=>$i);
         }
 
@@ -32,14 +34,13 @@ sub genmap {
     my $opts   = shift;
     my @map    = $this->create_tiles( $opts );
     my $map    = new Games::RolePlay::MapGen::_interconnected_map(\@map);
-    my $groups = [];
 
     my $group = &_group;
-       $group->{name}     = "One Big Room";
-       $group->{loc_size} = "(whole map)";
-       $group->{type}     = "room";
-       $group->{size}     = [$opts->{x_size}, $opts->{y_size}];
-       $group->{loc}      = [0, 0];
+       $group->name( "One Big Room" );
+       $group->type( "room" );
+       $group->add_rectangle( [0, 0], [$opts->{x_size}, $opts->{y_size}] );
+
+    my $groups = [$group];
 
     my $ymax = $#map;
     my $xmax = $#{ $map[0] };
@@ -47,6 +48,8 @@ sub genmap {
     for my $y ( 0 .. $ymax ) {
         for my $x ( 0 .. $xmax ) {
             my $tile = $map[$y][$x];
+
+            $opts->{t_cb}->() if exists $opts->{t_cb};
 
             $tile->{type}  = "room";
             $tile->{group} = $group;
@@ -92,6 +95,6 @@ This module generates one huge room that takes up the whole map.  Rather like th
 
 =head1 SEE ALSO
 
-Games::RolePlay::MapGen, Games::RolePlay::MapGen::Generator::Perfect, Games::RolePlay::MapGen::Generator::SparseAndLoops
+Games::RolePlay::MapGen
 
 =cut
