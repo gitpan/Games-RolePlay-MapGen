@@ -9,6 +9,7 @@ package Games::RolePlay::MapGen::Editor;
 # -Paul
 
 use strict;
+use GD;
 use Glib qw(TRUE FALSE);
 use Gtk2 -init; # -init tells import to ->init() your app
 use Gtk2::Ex::Simple::Menu;
@@ -388,7 +389,7 @@ sub save_text_as {
         my $map = $this->[MAP];
         eval {
             $map->set_exporter( "Text" );
-            $map->export( $fname );
+            $map->export( fname=>$fname, nocolor=>1 );
         };
         $this->error($@) if $@;
         $pulser->('destroy');
@@ -1626,7 +1627,16 @@ sub preferences {
 sub help {
     my $this = shift;
 
+    my $search = Pod::Simple::Search->new;
+       $search->inc(1);
+
+    my $x = $search->find("Games::RolePlay::MapGen::Editor");
+    my $s = { 'Games::RolePlay::MapGen::Editor' => $x };
+
+## DEBUG ## warn "\e[33mINC=\e[m(\e[1;33m@INC\e[m) x=$x";
+
     my $viewer = Gtk2::Ex::PodViewer->new;
+       $viewer->set_db($s); # cuz, do we really need to find THEM ALL?
        $viewer->load('Games::RolePlay::MapGen::Editor');
        $viewer->show;  # see, it's a widget!
 
@@ -1661,7 +1671,7 @@ sub about {
         authors        => ['Paul Miller <jettero@cpan.org>'],
         copyright      => 'Copyright (c) 2008 Paul Miller',
         comments       =>
-        "This is part of the Games::RolePlay::MapGen (GRM) Distribution.
+        "This is part of the Games::RolePlay::MapGen (GRM) Distribution v$Games::RolePlay::MapGen::VERSION.
          You can use it in your own projrects with few restrictions.
          Use at your own risk.  Designed for fun.  Have fun.",
     );

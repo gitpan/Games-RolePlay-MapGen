@@ -7,7 +7,7 @@ use AutoLoader;
 use Carp;
 use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::SortKeys = 1;
 
-our $VERSION = "1.2.0";
+our $VERSION = "1.2.10";
 our $AUTOLOAD;
 
 our %opp  = (n=>"s", e=>"w", s=>"n", w=>"e");
@@ -20,6 +20,8 @@ our %known_opts = (
     bounding_box           => "50x50",
     tile_size              => 10,
     cell_size              => "20x20",
+
+    nocolor => 0, # for the text map generator
 
     num_rooms              => "1d4+1",
     min_room_size          => "2x2",
@@ -40,24 +42,13 @@ sub _check_mod_path  {
     my $omod = shift;
        $omod =~ s/\:\:/\//g;
 
-    my $found = 0;
-    my $mod;
-    for my $toadd ("", "Games/RolePlay/MapGen/Generator/", "Games/RolePlay/MapGen/GeneratorPlugin/", "Games/RolePlay/MapGen/Exporter/", "Games/RolePlay/MapGen/ExporterPlugin/") {
-        $mod = "$toadd$omod";
-        for my $dir (@INC) {
-            # warn "trying $dir/$mod.pm" if $dir =~ m/blib/ and $mod =~ m/Text/;
-            if( -f "$dir/$mod.pm" ) {
-                $found = 1;
-                goto _NO_MORE_MOD_CHECK;
-            }
-        }
+    for my $mod ($omod, map {$_ . "::$omod"} "Games::RolePlay::MapGen::Generator", "Games::RolePlay::MapGen::GeneratorPlugin",
+            "Games::RolePlay::MapGen::Exporter", "Games::RolePlay::MapGen::ExporterPlugin") {
+
+        return $mod if eval "require $mod";
     }
 
-    _NO_MORE_MOD_CHECK:
-    return undef unless $found;
-
-    $mod =~ s/\/+/\:\:/g;
-    return $mod;
+    return;
 }
 # }}}
 # _check_opts {{{
@@ -100,18 +91,20 @@ sub AUTOLOAD {
 
         delete $this->{objs}{$type} if $this->{objs}{$type};
 
-        croak "Couldn't locate module \"$modu\"" unless $this->{$type} = $this->_check_mod_path( $modu );
+        my $module = "Games::RolePlay::MapGen::" . (ucfirst $type) . "::$modu";
+        croak "Couldn't locate module \"$modu\" during execution of $sub() $@" unless eval { "require $module" };
+
+        # NOTE: why does this not have {objs}? 5/12/8
+        $this->{$type} = $module;
 
         return;
 
     } elsif( $sub =~ m/MapGen\:\:add_(generator|exporter)_plugin$/ ) {
         my $type = $1;
         my $plug = shift;
-        my $newn;
 
-        delete $this->{objs}{$type} if $this->{objs}{$type};
-
-        croak "Couldn't locate module \"$plug\"" unless $newn = $this->_check_mod_path( $plug );
+        my $newn = "Games::RolePlay::MapGen::" . (ucfirst $type) . "Plugin::$plug";
+        croak "Couldn't locate module \"$plug\" during execution of $sub()" unless eval { "require $newn" };
 
         push @{ $this->{plugins}{$type} }, $newn;
 
@@ -120,12 +113,14 @@ sub AUTOLOAD {
     } elsif( $sub =~ m/MapGen\:\:set_([\w\d\_]+)$/ ) {
         my $n = $1;
 
-        croak "ERROR: set_$n() unknown setting" unless exists $known_opts{$n};
+        croak "ERROR: set_$n() unknown setting during execution of $sub()" unless exists $known_opts{$n};
 
         $this->{$n} = shift;
 
         for my $o (qw(generator exporter)) {
             if( my $oo = $this->{objs}{$o} ) {
+
+                # NOTE: how does this->{$n} relate to this->{objs}{$n} ... 5/12/8
                 $oo->{o}{$n} = $this->{$n};
             }
         }

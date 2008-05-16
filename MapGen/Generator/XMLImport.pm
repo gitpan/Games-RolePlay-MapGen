@@ -7,6 +7,8 @@ use Carp;
 use base qw(Games::RolePlay::MapGen::Generator);
 use Games::RolePlay::MapGen::Tools qw( _group _tile _door );
 use XML::XPath;
+use XML::Parser;
+use File::Spec;
 
 1;
 
@@ -14,9 +16,45 @@ sub genmap {
     my $this = shift;
     my $opts = shift;
 
+    my $xml_path = $INC{ 'Games/RolePlay/MapGen.pm' };
+       $xml_path =~ s/\.pm$//;
+
     croak "you must supply a filename with xml_input_file => \"something.xml\"" unless exists $opts->{xml_input_file};
     open my $input, $opts->{xml_input_file} or croak "unable to open $opts->{xml_input_file}: $!";
     my $xp = XML::XPath->new( ioref => $input );
+    $xp->set_parser( XML::Parser->new(
+        ErrorContext  => 2,
+        ParseParamEnt => 1,
+        Handlers=>{ExternEnt => sub {
+            my ($base, $name) = @_[1,2];
+            my $fname = ($base ? File::Spec->catfile($base, $name) : $name);
+
+            ## we're doing this in the grmedit.pl now ## if( $INC{'PAR.pm'} ) {
+            ## we're doing this in the grmedit.pl now ##     # NOTE: this could be about a million times more portable, but it isn't. 
+            ## we're doing this in the grmedit.pl now ##     # I posted a r.cpan bug (wishlist) about it:
+            ## we're doing this in the grmedit.pl now ##     #   http://rt.cpan.org/Ticket/Display.html?id=35821
+
+            ## we're doing this in the grmedit.pl now ##     # NOTE: doh, I can just return the contents of the file.  Pfft.
+
+            ## we're doing this in the grmedit.pl now ##     my $contents = eval {
+            ## we're doing this in the grmedit.pl now ##         my $r = PAR::read_file(my $f = File::Spec->catfile(qw(lib Games RolePlay MapGen MapGen.dtd)));
+            ## we're doing this in the grmedit.pl now ##         $r;
+            ## we're doing this in the grmedit.pl now ##     };
+
+            ## we're doing this in the grmedit.pl now ##     warn "@=$@" if $@;
+
+            ## we're doing this in the grmedit.pl now ##     return $contents if $contents and not $@;
+            ## we're doing this in the grmedit.pl now ## }
+
+            my $fh;
+            open $fh, $fname or
+            open $fh, File::Spec->catfile($xml_path, $fname) or
+            open $fh, File::Spec->catfile($xml_path, $name) or
+            die "unable to find \"$fname\" even using ($xml_path)";
+
+            $fh;
+        }},
+    ));
 
     my $Mo = $xp->find('/MapGen/option');
     for my $op ($Mo->get_nodelist) {
