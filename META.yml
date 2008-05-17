@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Games-RolePlay-MapGen
-version:             1.2.10
+version:             1.2.13
 abstract:            ~
 license:             ~
 generated_by:        ExtUtils::MakeMaker version 6.36
@@ -11,6 +11,7 @@ requires:
     Software::License::LGPL_2_1:   0
     Test:                          1.25
     Tie::IxHash:                   0
+    XML::Parser:                   2.33
     XML::Simple:                   0
     XML::XPath:                    0
 meta-spec:
