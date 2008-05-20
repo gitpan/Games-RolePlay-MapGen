@@ -41,3 +41,7 @@ vis1.map.xml
 MapGen/Editor.pod
 Locale_gettext.patch
 FAIL.mbox
+bsd6.1/test.dtd
+bsd6.1/test.xsl
+bsd6.1/test.pl
+bsd6.1/test.xml
