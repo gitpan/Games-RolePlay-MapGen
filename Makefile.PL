@@ -23,6 +23,8 @@ WriteMakefile(
     'NAME'         => 'Games::RolePlay::MapGen',
     'VERSION_FROM' => 'MapGen.pm',
     'PREREQ_PM'     => { 
+        'version' => 0,
+
         'Software::License::LGPL_2_1' => 0,
         'XML::Simple' => 0,
         'Tie::IxHash' => 0,
