@@ -28,12 +28,19 @@ if( $@ ) {
     ok( 1 ); # this should probably be a skip() instead... meh
 
 } else {
-    set_exporter $map("BasicImage");
+    set_exporter $map("PNG");
     export $map("map.png"); 
     ok( -f "map.png" );
 }
 
 # However, this I could actually test... if I got around to it.
+
+if( system($^X, "XMLEXPORT_pretest") != 0 ) {
+    warn "\n\n Your XML::Simple and/or XML::SAX is broken apparently ... skipping exporter tests.\n\n";
+    skip(1,1,1) for 1 .. 2;
+    skip(1,1,1) for 1 .. @{$map->{_the_map}}*@{$map->{_the_map}[0]};
+    exit 0;
+}
 
 set_exporter $map("XML");
 export $map("map.xml"); 

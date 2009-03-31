@@ -1,3 +1,4 @@
+# vi:filetype=perl:
 
 package Games::RolePlay::MapGen::Editor;
 
@@ -23,7 +24,15 @@ use DB_File;
 use Storable qw(freeze thaw);
 use Data::Dump qw(dump);
 use POSIX qw(ceil);
+use MIME::Base64;
 
+use POE::Component::Server::HTTP;
+use POE::Kernel {loop => "Glib"};
+use HTTP::Status;
+use CGI qw(escapeHTML);
+
+use Games::RolePlay::MapGen::MapQueue::Object;
+use Games::RolePlay::MapGen::MapQueue;
 use Games::RolePlay::MapGen::Editor::_MForm qw(make_form $default_restore_defaults);
 use Games::RolePlay::MapGen::Tools qw( roll choice _door _group );
 
@@ -37,11 +46,48 @@ our @FILTERS                   = (qw( BasicDoors FiveSplit ClearDoors ));
 
 use vars qw($x); # like our, but at compile time so these constants work
 use constant {
-    MAP   => $x++, WINDOW => $x++, SETTINGS  => $x++, MENU   => $x++,
-    FNAME => $x++, MAREA  => $x++, VP_DIM    => $x++, STAT   => $x++,
-    MP    => $x++, O_LT   => $x++, O_DR      => $x++, S_ARG  => $x++,
-    RCCM  => $x++, SEL_S  => $x++, SELECTION => $x++, SEL_E  => $x++,
-    SEL_W => $x++,
+    # the per-object index constants {{{
+    MAP       => $x++, # the Games::RolePlay::MapGen object, the actual map arrays are in [MAP]{_the_map}
+    MQ        => $x++, # the Games::RolePlay::MapGen::MapQueue object
+    WINDOW    => $x++, # the Gtk2 window (Gtk2::Window)
+    MENU      => $x++, # the main menubar (Gtk2::Ex::Simple::Menu)
+    MAREA     => $x++, # the map area Gtk2::Image
+    VP_DIM    => $x++, # the current dimensions (changes on resizes and things) of the Gtk2::Viewport holding the [MAREA]
+    SETTINGS  => $x++, # a tied DB_File hashref full of settings
+    FNAME     => $x++, # the current file name or undef
+    STAT      => $x++, # the statusbar (Gtk2::Statusbar)
+    MP        => $x++, # the current map pixbufs, cell size, and pixbuf dimensions
+    RCCM      => $x++, # the right click context menus (there are two: [RCCM][0] for tiles and [RCCM][1] for closures)
+    O_LT      => $x++, # the tile location currently moused-overed, O_ is for old, during the motion-notify, O_LT is the
+                       #  old location and LT is the new one, although, LT isn't a constant
+    SEL_S     => $x++, # the selection start, set to O_LT when a button is pressed
+    SEL_E     => $x++, # set to the end of the selection being dragged during the selection handler. really only used in
+                       #  the button release event to (possibly) select a single square when shift-clicking
+    SEL_W     => $x++, # the currently "working" select rectangle, used to pop the end of SELECTION while *still* dragging
+    SELECTION => $x++, # the current selection rectangles [ [x1,y1,x2,y2], [...], ... ]
+    S_ARG     => $x++, # the status-bar arguments: the current tile location (LT), tile type, and door info
+                       #  [\@lt, $tile->{type}, undef]; $sarg->[1] (type) is replaced with [$g->name, $g->desc] when
+                       #  $tile has a group... door info starts out as undef and changes to [dir=>desc] when there is a door
+                       #  moused-overed.  Perhaps the best way to describe it is this huge block of examples:
+                       #    [[11, 9, "corridor"], undef, undef]
+                       #    [[12, 9, "corridor"], undef, ["s", ["wall"]]]
+                       #    [[6, 4, "room"], ["Room #1", "(4, 3) 10x8"], undef]
+                       #    [[6, 3, "room"], ["Room #1", "(4, 3) 10x8"], ["w", ["opening"]]]
+                       #    [[5, 5], ["Room #1", "(4, 3) 10x8"], undef]
+                       #    [[5, 5], ["Room #1", "(4, 3) 10x8"], ["e", ["opening"]]]
+                       #    [[6, 5, "room"], ["Room #1", "(4, 3) 10x8"], undef]
+                       #    [[6, 6, "room"], ["Room #1", "(4, 3) 10x8"], undef]
+                       #    [[6, 6], ["Room #1", "(4, 3) 10x8"], ["s", ["opening"]]]
+                       #    [[6, 7, "room"], ["Room #1", "(4, 3) 10x8"], ["n", ["opening"]]]
+                       #    [[6, 7], ["Room #1", "(4, 3) 10x8"], undef]
+                       #    [[6, 7], ["Room #1", "(4, 3) 10x8"], ["s", ["wall"]]]
+                       #    [[6, 8, "corridor"], undef, ["n", ["wall"]]]
+                       #    [[7, 8], undef, ["n", ["ordinary", "door"]]]
+                       #    [ [7, 7, "room"], ["Room #1", "(4, 3) 10x8"], ["s", ["ordinary", "door"]], ]
+    O_DR      => $x++, # door info, [dir => desc], called O_DR since it's the "old" door.  really only used to invoke a 
+                       #  reddraw of the cursors when there *was* a door (O_DR) and there *nolonger* is one
+    SERVER    => $x++, # the map server (if applicable) [port, PoCo::HTTPD]
+    # }}}
 };
 
 1;
@@ -137,8 +183,12 @@ sub new {
                     callback    => sub { warn "forced redraw"; $this->draw_map; $this->draw_map_w_cursor },
                     accelerator => '<ctrl>R',
                 },
-                'Render _Settings'=> {
+                'R_ender Settings'=> {
                     callback    => sub { $this->render_settings },
+                },
+                'Server _Settings'=> {
+                    callback    => sub { $this->server_settings },
+                    accelerator => '<ctrl>T',
                 },
                 Separator => {
                     item_type => '<Separator>',
@@ -182,27 +232,57 @@ sub new {
     my $al    = Gtk2::Alignment->new(0.5,0.5,0,0);
     my $eb    = Gtk2::EventBox->new;
 
+    $eb->set_has_tooltip(TRUE);
+    $eb->signal_connect( query_tooltip => sub {
+        my ($widget, $x, $y, $keyboard_mode, $tooltip) = @_;
+
+        my @cs = split('x', $this->[MAP]{cell_size});
+        my @tc = (int($x/$cs[0]), int($y/$cs[1]));
+
+        return FALSE unless $this->[MQ]->_check_loc(\@tc);
+
+        my @o  = $this->[MQ]->objects_at_location(@tc);
+
+        return FALSE unless @o;
+
+        $tooltip->set_text(
+            join("\n",
+             map { my $d = $_->[0]->desc; my $v = ($_->[1]=~ s/(\d+)$/ $1/ ? $_->[1] : "living"); "$v: $d" }
+            sort {$a->[-1] <=> $b->[-1] || $a->[1] cmp $b->[1] }
+             map {my $x= [$_, $_->attr('var')]; push @$x, ($x->[1]=~m/^l/?0:1); $x} @o) );
+
+        return TRUE;
+    });
+
     # This is so we can later determin the size of the viewport.
     $this->[VP_DIM] = my $dim = [];
-    $vp->signal_connect( 'size-allocate' => sub { my $r = $_[1]; $dim->[0] = $r->width; $dim->[1] = $r->height; 0; });
+    $vp->signal_connect( size_allocate => sub { my $r = $_[1]; $dim->[0] = $r->width; $dim->[1] = $r->height; 0; });
 
     my $sb = $this->[STAT] = new Gtk2::Statusbar; $sb->push(1,'');
 
     my $s_up = sub {
         $sb->pop(1); return unless @_;
 
-        my $tile  = shift; my $type = pop @$tile if @$tile == 3;
+        if( not ref $_[0] ) {
+            my @c = caller;
+            warn "caller=(@c)";
+        }
+
+        # @_ is just like $this->[S_ARG], but (stuff) instead of [stuff]
+
+        my $loc   = shift; # so this is (x,y), not a tile object from the actual map
+        my $type  = pop @$loc if @$loc == 3;
         my $group = shift;
         my $door  = shift;
         my $txt   = '';
 
-        if( $tile ) {
-            $txt .= "tile: " . ($type ? "$type " : ''). sprintf('[%d,%d]', @$tile);
+        if( $loc ) {
+            $txt .= "tile: " . ($type ? "$type " : ''). sprintf('[%d,%d]', @$loc);
             $txt .= ":$door->[0] (@{$door->[1]})" if $door;
             $txt .= " \x{2014} group: @$group" if $group;
 
         } else {
-            $tile = $group = $door = undef;
+            $loc = $group = $door = undef;
         }
 
         $sb->push(1, $txt);
@@ -230,7 +310,7 @@ sub new {
         $this->marea_button_release_event(@_);
     });
 
-    $eb->signal_connect ('button-press-event' => sub {
+    $eb->signal_connect ( button_press_event => sub {
         my ($widget, $event) = @_;
 
         if( $event->button == 3 ) {
@@ -239,6 +319,11 @@ sub new {
 
         } else {
             $this->marea_button_press_event(@_);
+            $this->double_click_map(@_)
+                if $event->type eq '2button-press';
+
+                # tried using >= and * (see Glib under flags), but this
+                # seems to return boring strings
         }
 
         return FALSE; # returning true prevents other events from firing
@@ -305,10 +390,28 @@ sub save_file {
 
     my $file   = $this->[FNAME];
     my $pulser = $this->pulser( "Saving $file ...", "File I/O", 175 );
-    my $map = $this->[MAP];
+    my $map    = $this->[MAP];
+    my %mqo    = (map {("@{$_->[0]}" => $_->[1])} $this->[MQ]->objects_with_locations);
     eval {
         $map->set_exporter( "XML" );
-        $map->export( fname => $this->[FNAME], t_cb => $pulser );
+        $map->export( fname => $this->[FNAME], t_cb => sub {
+            my (($x,$y), $h) = @_;
+
+            local $" = ",";
+
+            for my $o (@{$mqo{"$x $y"}}) {
+                push @{$h->{contents}{item}}, {
+                    name=> $o->{v}, unique => ($o->{u}?'true':'false'), qty=> $o->{q}, ($o->{c} ? (id=>$o->{c}) :()),
+                    attr=>[
+                        map  { {name=>$_->[0], value=>(ref($_->[1]) ? "@{$_->[1]}" : $_->[1])} }
+                        map  { [$_, $o->{a}{$_}] }
+                        keys %{$o->{a}}
+                    ],
+                };
+            }
+
+            $pulser->();
+        });
     };
     $this->error($@) if $@;
     $pulser->('destroy');
@@ -329,6 +432,7 @@ sub save_file_as {
            $fname .= ".xml" unless $fname =~ m/\.xml\z/i;
 
         $this->[FNAME] = $fname;
+        $this->[WINDOW]->set_title("GRM Editor: $fname");
 
 
         $file_chooser->destroy;
@@ -359,7 +463,7 @@ sub save_image_as {
         my $pulser = $this->pulser( "Saving $fname ...", "File I/O", 150 );
         my $map = $this->[MAP];
         eval {
-            $map->set_exporter( "BasicImage" );
+            $map->set_exporter( "PNG" );
             $map->export( fname => $fname, t_cb => $pulser );
         };
         $this->error($@) if $@;
@@ -402,17 +506,63 @@ sub save_text_as {
     $file_chooser->destroy;
 }
 # }}}
-# read_file {{{
+# read_file (aka load_file) {{{
 sub read_file {
     my $this = shift;
     my $file = shift;
 
     my $pulser = $this->pulser( "Reading $file ...", "File I/O" );
-    eval { $this->[MAP] = Games::RolePlay::MapGen->import_xml( $file, t_cb => $pulser ) };
+    eval {
+        my %mqo;
+        $this->[MAP] = my $map = Games::RolePlay::MapGen->import_xml( $file, t_cb => sub {
+            if( my ($x,$y, $txp) = @_ ) {
+
+                my $items = $txp->find('contents/item');
+                for my $item ($items->get_nodelist) {
+                    my $name = $item->findvalue( '@name'   )->value;
+                    my $uniq = $item->findvalue( '@unique' )->value;
+                    my $qty  = $item->findvalue( '@qty'    )->value;
+                    my $id   = $item->findvalue( '@id'     )->value;
+
+                    my $attrs = $item->find('attr');
+                    my %a;
+                    for my $attr ($attrs->get_nodelist) {
+                        my $var = $attr->findvalue( '@name'  )->value;
+                        my $val = $attr->findvalue( '@value' )->value;
+
+                        $a{$var} = $val;
+                    }
+
+                    my $ob = new Games::RolePlay::MapGen::MapQueue::Object($name);
+                       $ob->nonunique($id) unless $uniq and $uniq eq "true";
+                       $ob->quantity($qty) if $qty;
+
+                    for my $k (keys %a) {
+                        my $v = $a{$k};
+                           $v = [ split ",", $v ] if $k eq "color";
+
+                        $ob->attr($k => $v);
+                    }
+
+                    push @{$mqo{$x}{$y}}, $ob;
+                }
+            }
+
+            $pulser->();
+        });
+
+        $this->[MQ] = my $mq = new Games::RolePlay::MapGen::MapQueue( $map );
+        for my $x (keys %mqo) {
+        for my $y (keys %{ $mqo{$x} }) {
+        for my $o (@{$mqo{$x}{$y}}) {
+            $mq->replace( $o => ($x,$y) );
+        }} }
+    };
     $this->error($@) if $@;
     $pulser->('destroy');
 
     $this->[FNAME] = $file;
+    $this->[WINDOW]->set_title("GRM Editor: $file");
     $this->draw_map;
 }
 # }}}
@@ -456,7 +606,52 @@ sub pulser {
 # }}}
 
 # DRAWING 
-# draw_map {{{
+# draw_mapqueue_objects {{{
+sub draw_mapqueue_objects {
+    my ($this, $image) = @_;
+
+    my $outline  = $image->colorAllocate(0, 0, 0);
+
+    my @cs = split('x', $this->[MAP]{cell_size});
+    my @hs = map {$_ / 2.555555555555} @cs; # humanoid size
+    my @of = map {int($_/2)}           @cs; # humanoid offset
+    my @is = map {$_ / 3.285714}       @cs; # item size
+    my @if = map {$_ / 4.6}            @cs; # item offset
+
+    my %colors;
+
+    for my $owl ($this->[MQ]->objects_with_locations) {
+        my ($x, $y, @o) = map {@$_} @$owl;
+
+        $x = $cs[0]*$x + $of[0];
+        $y = $cs[1]*$y + $of[1];
+
+        for my $o (@o) {
+            my $var = $o->attr('var');
+            my $col = $o->attr('color');
+            my $icl = $colors{"@$col"};
+
+            unless( defined $icl ) {
+                $icl = $colors{"@$col"} = $image->colorAllocate(@$col);
+            }
+
+            if( $var =~ m/^l/ ) {
+                $image->filledEllipse ( $x, $y, @hs, $icl );
+                $image->ellipse       ( $x, $y, @hs, $outline  );
+
+            } elsif( my ($in) = $var =~ m/item(\d+)/ ) {
+                my $c  = 2*3.1415926 * ($in/8);
+                my $ax = $x + $if[0] * cos $c;
+                my $ay = $y + $if[1] * sin $c;
+
+                $image->filledEllipse ( $ax, $ay, @is, $icl );
+                $image->ellipse       ( $ax, $ay, @is, $outline );
+            }
+        }
+    }
+}
+# }}}
+# draw_map (initial draw after a new mapload, sets up the MP pixbufs, etc) {{{
 sub draw_map {
     my $this = shift;
 
@@ -465,10 +660,12 @@ sub draw_map {
 
     # clear out any selections or cursors that probably nolonger apply
     $this->[SEL_S] = $this->[SEL_E] = $this->[SELECTION] = $this->[O_DR] = $this->[S_ARG] = undef;
-    @{$this->[O_LT]}=();
+    @{$this->[O_LT]}=(); # this clears the pointer whole-tile highlight
 
-    $map->set_exporter( "BasicImage" );
+    $map->set_exporter( "PNG" );
     my $image = $map->export( -retonly );
+
+    $this->draw_mapqueue_objects( $image );
 
     my $loader = Gtk2::Gdk::PixbufLoader->new;
        $loader->write($image->png);
@@ -556,6 +753,133 @@ sub draw_map_w_cursor {
     $this->[MAREA]->set_from_pixbuf($pb);
 }
 # }}}
+# double_click_map {{{
+sub double_click_map {
+    my ($this, $widget, $event) = @_;
+
+    # For some reason, double clicking trips a selection.
+    # rather than carefully figuring that out, we'll just clear it.
+    $this->[SEL_S] = $this->[SEL_E] = $this->[SELECTION] = undef;
+
+    my @o_lt = @{$this->[O_LT]};
+    my $tile = $this->[MAP]{_the_map}[ $o_lt[1] ][ $o_lt[0] ];
+    return unless defined $tile->{type};
+
+    if( my $s2 = @{$this->[S_ARG]}[2] ) {
+        my $d  = $s2->[0];
+        my $od = $tile->{od}{$d};
+
+        if( ref $od ) {
+            $this->closure_door_properties( [$tile, $d] );
+
+        } else {
+            goto PFFT;
+        }
+
+    } else {
+        PFFT: $this->edit_items_at_location( $tile, @o_lt );
+    }
+}
+# }}}
+# edit_items_at_location {{{
+sub edit_items_at_location {
+    my ($this, $tile, $x,$y ) = @_;
+
+    my $options = [[ # column 1
+        { mnemonic => "_Living: ",
+          type     => "text",
+          desc     => "the name of the living you wish to add to the map",
+          name     => 'lname',
+          default  => '' },
+
+        (map(
+            { mnemonic => "Item #_$_: ",
+              type     => "text",
+              desc     => "the name of an item at this location",
+              name     => "item$_",
+              default  => '' }, 1 .. 8)),
+    ],[
+        { mnemonic => "unique: ",
+          type     => "bool",
+          desc     => "whether this living is uniquely named",
+          name     => 'ulname',
+          disable  => { lname => sub { $_[0] =~ m/^(.+?)\s*\#\s*(\d+)\s*$/ } },
+          default  => 1 },
+
+        (map(
+            { mnemonic => "unique: ",
+              type     => "bool",
+              desc     => "whether this living is uniquely named",
+              name     => "uitem$_",
+              disable  => { "item$_" => sub { $_[0] =~ m/^(.+?)\s*\#\s*(\d+)\s*$/ } },
+              default  => 0 }, 1 .. 8)),
+    ],[
+        { mnemonic => "color: ",
+          type     => "color",
+          desc     => "the color of the living marker",
+          name     => 'clname',
+          default  => '#6464ff' },
+
+        (map(
+            { mnemonic => "color: ",
+              type     => "color",
+              desc     => "the color of the item #$_ marker",
+              name     => "citem$_",
+              default  => '#ffff00' }, 1 .. 8)),
+    ]];
+
+    my $i = {};
+    my %o_i;
+    for my $o ($this->[MQ]->objects_at_location($x,$y)) {
+        my $k = $o->attr('var');
+        my $c = $o->attr('color');
+        my $C = sprintf('#%02x%02x%02x', @$c);
+
+        push @{$o_i{$k}}, $o;
+        $i->{$k} = $o->desc;
+        $i->{'c' . $k} = $C;
+    }
+
+    my ($result, $o) = make_form($this->[WINDOW], $i, $options, "Objects at Location");
+    if( $result eq "ok" ) {
+
+        for my $k (grep {!m/^[uc]/} sort keys %$o) {
+            if( my $k = delete $o_i{$k} ) {
+                $this->[MQ]->remove( $_ ) for @$k;
+            }
+
+            my $v = $o->{$k};
+            next unless $v =~ m/[\w\d]/;
+            $v =~ s/^\s+//;
+            $v =~ s/\s+$//;
+
+            my ($n, $c) = $v =~ m/^(.+?)\s*\#\s*(\d+)\s*$/;
+
+            $n = $v unless defined $n;
+
+            my $color  = $o->{'c'.$k};
+            my $unique = $o->{'u'.$k};
+            my $qty    = $1 if $n =~ s/\s*\(\s*(\d+)\s*\)\s*$//;
+
+            my $ob = new Games::RolePlay::MapGen::MapQueue::Object($n||$v);
+               $ob->quantity($qty) if defined $qty;
+               $ob->attr(var => $k);
+               $ob->attr(color => [ map { hex $_ } $color =~ m/([\d\w]{2})/g ]);
+
+            if( $c ) {
+                $ob->nonunique($c);
+
+            } elsif( not $unique ) {
+                $ob->nonunique;
+            }
+
+            $this->[MQ]->replace( $ob => $x,$y );
+        }
+
+        $this->draw_map; # draw the map from scratch with the new objects
+    }
+}
+# }}}
 # marea_button_press_event {{{
 sub marea_button_press_event {
     my ($this, $ebox, $ebut) = @_;
@@ -571,7 +895,7 @@ sub marea_button_release_event {
 
     unless( $this->[SEL_E] ) {
         my @state = $ebut->device->get_state( $this->[MAREA]->get_parent_window );
-        my $shift = $state[0] * 'shift-mask'; # see Glib under flgas for reasons this makes sense
+        my $shift = $state[0] * 'shift-mask'; # see Glib under flags for reasons this makes sense
         if( $shift ) {
             # NOTE: pretend we just selected this one tile with motion, so it adds to the current selection:
             $this->marea_selection_handler( $this->[O_LT], $this->[O_LT], $ebut );
@@ -649,10 +973,8 @@ sub marea_selection_handler {
 
     $this->[SEL_E] = $lt;
 
-    # 1. if we're holding control, we should subtract rectangles
+    # 1. TODO: if we're holding control, we should subtract rectangles
     # 2. if we're hodling shift, we should add rectangles
-    # 3. for now, you can only select one rectangle, we will nontheless
-    #    prepare for more than one rectangle by storing a list of lists
 
     my $a = [@$s_sel, @$lt];
     my $w = $this->[SEL_W];
@@ -781,7 +1103,11 @@ sub tileconvert_to_wall_tiles {
 
     # NOTE: The @_ passed to us is prefiltered by our {enable} from the context menu
 
+    my $mq = $this->[MQ];
+
     for my $tile (@_) {
+        $mq->remove( $_ ) for $mq->objects_at_location(@$tile{qw(x y)});
+
         delete $tile->{group};
         delete $tile->{type};
 
@@ -927,7 +1253,7 @@ sub closure_door_properties {
             { mnemonic => "M_inor Direction: ", type => "choice", choices => $min, name => '_open_dir_minor', desc => "The final direction of the door swing.",   },
         ]];
 
-        my ($result, $o) = make_form($this->[WINDOW], $i, $options);
+        my ($result, $o) = make_form($this->[WINDOW], $i, $options, "Door Properties");
         next unless $result eq "ok";
         $c ++;
         $od->{$_} = $o->{$_} for qw(open locked secret stuck);
@@ -1239,10 +1565,12 @@ sub right_click_map {
 
     my @a;
     if( my $s = $this->[SELECTION] ) {
+        my %already;
         for my $r (@$s) {
             for my $x ($r->[0] .. $r->[2]) {
             for my $y ($r->[1] .. $r->[3]) {
-                push @a, [$x,$y];
+                next if $already{$x,$y};
+                $already{$x,$y} = push @a, [$x,$y];
             }}
         }
 
@@ -1289,12 +1617,15 @@ sub blank_map {
     # Later, we'll have a generate_map() that has all kinds of configuations options.
 
     $this->[FNAME] = undef;
+    $this->[WINDOW]->set_title("GRM Editor");
 
     my $map = $this->[MAP] = new Games::RolePlay::MapGen({
         tile_size    => 10,
         cell_size    => "23x23",
         bounding_box => "25x25",
     });
+
+    $this->[MQ] = new Games::RolePlay::MapGen::MapQueue( $map );
 
     $map->set_generator("Blank");
     $map->generate; 
@@ -1517,10 +1848,13 @@ sub get_generate_opts {
         ],
     ];
 
-    my ($result, $o) = make_form($this->[WINDOW], $i, $options, $extra_buttons);
+    my ($result, $o) = make_form($this->[WINDOW], $i, $options, "Generate Map", $extra_buttons);
     if( $result eq "ok" ) {
-        $i->{$_} = $o->{$_} for keys %$o;
-        $this->[SETTINGS]{GENERATE_OPTS} = freeze $i;
+        # why?
+        # $i->{$_} = $o->{$_} for keys %$o;
+        # $this->[SETTINGS]{GENERATE_OPTS} = freeze $i;
+
+        $this->[SETTINGS]{GENERATE_OPTS} = freeze $o;
     }
 
     return ($result, $o);
@@ -1535,6 +1869,7 @@ sub generate {
     return unless $result eq "ok";
 
     $this->[FNAME] = undef;
+    $this->[WINDOW]->set_title("GRM Editor");
 
     $generator = delete $settings->{generator};
     @plugins   = @{ delete $settings->{generator_plugins} };
@@ -1547,6 +1882,8 @@ sub generate {
             $map->set_generator($generator);
             $map->add_generator_plugin( $_ ) for @plugins;
             $map->generate( %$settings, t_cb => $pulser ); 
+
+            $this->[MQ] = new Games::RolePlay::MapGen::MapQueue( $map );
         };
 
         $pulser->('destroy');
@@ -1581,17 +1918,153 @@ sub render_settings {
        $i = thaw $i if $i;
        $i = {} unless $i;
 
-    my ($result, $o) = make_form($this->[WINDOW], $i, $options);
+    my ($result, $o) = make_form($this->[WINDOW], $i, $options, "Render Settings");
     return unless $result eq "ok";
 
     if($o->{cell_size} ne $i->{cell_size}) {
         $i->{cell_size} = $o->{cell_size};
-        $this->[SETTINGS]{GENERATE_OPTS} = freeze $i;
+        $this->[SETTINGS]{GENERATE_OPTS} = freeze $i; # here, we freeze $i because it has many more options than $o
     }
 
     if($o->{cell_size} ne $this->[MAP]{cell_size}) {
         $this->[MAP]{$_} = $i->{$_} = $o->{$_} for keys %$o;
         $this->draw_map;
+    }
+}
+# }}}
+# server_settings {{{
+sub server_settings {
+    my $this = shift;
+
+    my $options = [[
+        { mnemonic => "Enabled: ",
+          type     => "bool",
+          desc     => "Whether to listen.",
+          name     => 'listen',
+          default  => $this->[SERVER] ? 1:0,
+          matches  => [qr/^\d+$/] },
+        { mnemonic => "Server Port: ",
+          type     => "text",
+          desc     => "The port on which your server runs.",
+          name     => 'port',
+          default  => '4000',
+          matches  => [qr/^\d+$/] },
+
+        # TODO: We'll eventually want the bind port and default url as options
+    ]];
+
+    my $i = $this->[SETTINGS]{SERVER_OPTIONS};
+       $i = thaw $i if $i;
+       $i = {} unless $i;
+
+    my ($result, $o) = make_form($this->[WINDOW], $i, $options, "Server Settings");
+    return unless $result eq "ok";
+
+    my $diff = 0;
+    for my $k (keys %$o) {
+        next if $k eq "listen";
+        $diff ++ if $o->{$k} ne $i->{$k};
+    }
+    my $listen = delete $o->{'listen'};
+
+    $this->[SETTINGS]{SERVER_OPTIONS} = freeze $o if $diff;
+    $this->server_control($listen, $o);
+}
+# }}}
+# server_control {{{
+sub server_control {
+    my ($this, $listen, $o) = @_;
+
+    if( $listen ) {
+        my $to_start = 1;
+        if( my $s = $this->[SERVER] ) {
+            if( $s->[0] ne $o->{port} ) {
+                POE::Kernel->call($s->[0]{httpd}, "shutdown");
+                $s->[1]->destroy;
+                delete $this->[SERVER];
+
+            } else {
+                $to_start = 0;
+            }
+        }
+
+        unless( eval "require Games::RolePlay::MapGen::Editor::_jQuery; 1" ) {
+            warn "ERROR loading jquery: $@";
+            return;
+        }
+
+        if( $to_start ) {
+            my $s; $s = $this->[SERVER] = [
+                POE::Component::Server::HTTP->new(
+                    Port => $o->{port},
+                    Headers => { Server => 'GRM Server' },
+                    ContentHandler => ({
+                        '/'        => sub { $this->http_root_handler($s->[2], @_) },
+                        '/jquery/' => sub { $this->http_jquery_handler($s->[2], @_) },
+                        })
+                ),
+                my $w = Gtk2::Window->new('toplevel'),
+            ];
+          # $w->set_destroy_with_parent(TRUE);
+          # $w->set_transient_for($this->[WINDOW]);
+            $w->set_title("GRM Server");
+            $w->set_size_request(500,200);
+            $w->set_position('center');
+            $w->add(my $vbox = Gtk2::VBox->new);
+            $vbox->add(my $scwin = Gtk2::ScrolledWindow->new); # ($tv->get_focus_hadjustment, $tv->get_focus_vadjustment)
+            $scwin->add(my $tv = Gtk2::TextView->new);
+            $scwin->set_policy('automatic', 'automatic');
+
+            $tv->set_editable(FALSE);
+            $tv->set_wrap_mode("none");
+            $tv->set_cursor_visible(FALSE);
+
+            my $b = $tv->get_buffer;
+            my $l = sub {
+                my $ent = shift;
+                   $ent =~ s/[\r\n]/ /g;
+                   $ent =~ s/\s{2,}/ /g;
+                   $ent .= "\n";
+
+                $tv->scroll_to_iter($b->get_end_iter, FALSE,FALSE, 0,0);
+                Gtk2->main_iteration while Gtk2->events_pending;
+                $b->insert($b->get_end_iter, localtime() . ": $ent");
+            };
+            push @$s, $l;
+
+            $l->("server started on port $o->{port}");
+
+            $w->signal_connect( delete_event => sub {
+                POE::Kernel->call($s->[0]{httpd}, "shutdown");
+                delete $this->[SERVER];
+                FALSE; # this apparently can't return true
+            });
+
+            my $adder = sub {
+                $vbox->add( my $hbox = Gtk2::HBox->new );
+                $hbox->add( my $ul = Gtk2::Label->new("Username: ") );
+                $hbox->add( my $ue = Gtk2::Entry->new );
+                $hbox->add( my $pl = Gtk2::Label->new("Password: ") );
+                $hbox->add( my $pe = Gtk2::Entry->new );
+                $hbox->add( my $nl = Gtk2::Label->new("Map Name: ") );
+                $hbox->add( my $ne = Gtk2::Entry->new );
+
+                $ul->set_tooltip_text( "The users login name." );
+                $pl->set_tooltip_text( "The users password (leave blank to accept any string)." );
+                $nl->set_tooltip_text( "The name of a unique item on the map to connect with." );
+            };
+
+            $adder->();
+
+            $w->show_all;
+        }
+
+    } else {
+        if( my $s = $this->[SERVER] ) {
+            POE::Kernel->call($s->[0]{httpd}, "shutdown");
+            $s->[1]->destroy;
+            delete $this->[SERVER];
+        }
     }
 }
 # }}}
@@ -1618,9 +2091,77 @@ sub preferences {
           default  => 1 },
     ]];
 
-    my ($result, $o) = make_form($this->[WINDOW], $i, $options);
+    my ($result, $o) = make_form($this->[WINDOW], $i, $options, "Preferences");
     return unless $result eq "ok";
     $this->[SETTINGS]{$_} = $o->{$_} for keys %$o;
+}
+# }}}
+
+# SERVER FUNCTIONS
+# http_root_handler {{{
+sub http_root_handler {
+    my ($this, $l, $request, $response) = @_;
+
+    my $uri  = $request->uri; # request is an HTTP::Request (and a little more)
+    my $path = $uri->path;    # uri is an URI object
+
+    my @o     = $this->[MQ]->objects;
+    my $odump = escapeHTML(dump(\@o));
+    my $auth  = $request->header("authorization");
+
+    $l->("request for $path" . ($auth ? " (auth: $auth)" : ""));
+
+    my ($u, $p);
+    if( my ($mime) = $auth =~ m/Basic\s*(.+)/ ) {
+        if( (my @r = split(/:/, decode_base64($mime), 2)) == 2 ) {
+            ($u, $p) = @r;
+        }
+    }
+
+    if( 0 and ($u and $p) ) {
+        $response->code(RC_OK);
+        $response->header( content_type => "text/html" );
+        $response->content(qq
+            <html>
+                <head><title>MapGen Server</title><script src='/jquery/'></script></head>
+                <body>
+                    <p> Hi $u, you fetched $uri authenticated with $p.\n</p>
+                    <pre>$odump</pre>
+                </body>
+            </html>
+        );
+
+    } else {
+        $response->code(401);
+        $response->header( content_type => "text/html", www_authenticate => 'Basic realm="MapGen Server"' );
+        $response->content(qq
+            <html>
+                <head><title>MapGen Server</title>
+                <body>
+                    <p> 401 Authorization Required.
+                    <p> Who are you?
+                </body>
+            </html>
+        );
+    }
+
+    return RC_OK;   
+}
+# }}}
+# http_jquery_handler {{{
+sub http_jquery_handler {
+    my ($this, $l, $request, $response) = @_;
+
+    my $uri  = $request->uri; # request is an HTTP::Request (and a little more)
+    my $path = $uri->path;    # uri is an URI object
+
+    $l->("request for $path");
+
+    $response->code(RC_OK);
+    $response->header( content_type => "text/javascript" );
+    $response->content( Games::RolePlay::MapGen::Editor::_jQuery::as_string() );
+
+    return RC_OK;   
 }
 # }}}
 
@@ -1701,9 +2242,39 @@ sub quit {
     Gtk2->main_quit;
 }
 # }}}
+# warning_handler {{{
+sub warning_handler {
+    my $this = shift;
+    my $err  = shift;
+
+    our $warnings_ignore;
+    unless( $warnings_ignore ) {
+        my @ignore = (
+            qr(Use of uninitialized value in subtraction.*Glib.pm.*line),
+        );
+
+        $warnings_ignore = do { local $" = "|"; qr(@ignore) };
+    }
+
+    if( $err =~ m/(?:ERROR|WARNING)/ ) {
+        $this->error($err);
+
+    } elsif( $err =~ $warnings_ignore ) {
+        # ignore
+
+    } else {
+       my ($package, $filename, $line, $subroutine, $hasargs,
+           $wantarray, $evaltext, $is_require, $hints, $bitmask) = caller 1;
+
+        warn "$err at $filename line $line (in $subroutine)\n";
+    }
+}
+# }}}
 # run {{{
 sub run {
     my $this = shift;
+
+    local $SIG{__WARN__} = sub { $this->warning_handler(@_) };
 
     if( $this->[SETTINGS]{REMEMBER_SP} and my $sp = $this->[SETTINGS]{MAIN_SIZE_POS} ) {
         my ($w,$h,$x,$y) = @{thaw $sp};
@@ -1718,6 +2289,23 @@ sub run {
 
     if( $this->[SETTINGS]{LOAD_LAST} and my $f = $this->[SETTINGS]{LAST_FNAME} ) {
         $this->read_file($f) if -f $f;
+    }
+
+    # NOTE: is it smarter to let the POE::Kernel think it's finished and run
+    # under Gtk2->main?  or is it smarter to leave the Kernel running and never
+    # call the Gtk2->main?  Currently, we let the Kernel finish and run under
+    # Gtk2.  So, we create a session that doesn't do anything, letting the
+    # session finish, so the POE->run returns and we fall through to the
+    # Gtk2->main;
+
+    POE::Session->create(inline_states=>{_start=>sub{}});
+    POE::Kernel->run;
+
+    if( "@ARGV" =~ m/server\s*(\d+)?/ ) {
+        my $port = $1 || 4000;
+
+        # NOTE: curiously, the above means we let the Kernel finish before we start the server session.
+        $this->server_control(1, {port=>$port});
     }
 
     Gtk2->main;

@@ -82,8 +82,6 @@ sub genmap {
             my $x_pos = $xp->findvalue( '@xpos' => $tile )->value;
             my $type  = $xp->findvalue( '@type' => $tile )->value;
 
-            $opts->{t_cb}->() if exists $opts->{t_cb};
-
             my $t = &_tile( x=>$x_pos, y=>$y_pos );
 
             if( $type eq "wall" ) {
@@ -140,6 +138,8 @@ sub genmap {
                     die "hrm: closure type=$type";
                 }
             }
+
+            $opts->{t_cb}->(($x_pos+1,$y_pos+1), $tile) if exists $opts->{t_cb};
         }
     }
 
@@ -186,7 +186,9 @@ Games::RolePlay::MapGen::Generator::XMLImport - Slurp up XML map data into MapGe
     $map->set_generator( "XMLImport" );
     $map->generate( xml_input_file => "map.xml" );
 
-    generate $map;
+The MapGen base object also knows a shortcut to perform the above:
+
+    my $map = Games::RolePlay::MapGen->import_xml("map.xml"); 
 
 =head1 SEE ALSO
 

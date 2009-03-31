@@ -48,10 +48,11 @@ our $default_restore_defaults = sub {
     };
 
 sub make_form {
-    my ($parent_window, $i, $options, $extra_buttons) = @_;
+    my ($parent_window, $i, $options, $title, $extra_buttons) = @_;
 
-    my $dialog = new Gtk2::Dialog("Map Generation Options", $parent_window, [], 'gtk-cancel' => "cancel", 'gtk-ok' => "ok");
     my $table = Gtk2::Table->new(scalar @{$options->[0]}*2, scalar @$options, FALSE);
+    my $dialog = new Gtk2::Dialog(($title||"Data Required"), $parent_window, [], 'gtk-cancel' => "cancel", 'gtk-ok' => "ok");
+       $dialog->set_default_response('ok');
 
     my $reref = {};
 
@@ -78,6 +79,7 @@ sub make_form {
 
                 $attach = $widget = new Gtk2::Entry;
                 $widget->set_text($d);
+                $widget->set_activates_default(TRUE);
 
                 $widget->set_tooltip_text( $item->{desc} ) if exists $item->{desc};
                 $widget->signal_connect(changed => sub {
@@ -112,6 +114,28 @@ sub make_form {
                 }
 
               # $widget->signal_connect(changed => sub { warn "test!"; }); # [WORKS FINE]
+
+            } elsif( $IT eq "color" ) {
+                my $d = exists $i->{$item->{name}} ? $i->{$item->{name}} : $item->{default};
+                   $d = $item->{trevnoc}->($d) if ref $d and exists $item->{trevnoc};
+                my @c = map {(hex $_)*257} $d =~ m/([a-fA-F\d]{2})/g;
+
+                $attach = $widget = Gtk2::ColorButton->new_with_color(Gtk2::Gdk::Color->new(@c));
+                $widget->set_tooltip_text( $item->{desc} ) if exists $item->{desc};
+
+                my $color = sub {
+                    my $c   = $widget->get_color;
+                    my @rgb = map {int( $c->$_() / 257 )} qw(red green blue);
+
+                    sprintf '#%02x%02x%02x', @rgb;
+                };
+
+                if( $item->{convert} ) {
+                    $item->{extract} = sub { $item->{convert}->( $color->() ) };
+
+                } else {
+                    $item->{extract} = sub { $color->() };
+                }
 
             } elsif( $IT eq "choice" ) {
                 $attach = $widget = Gtk2::ComboBox->new_text;

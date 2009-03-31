@@ -1,10 +1,10 @@
-# vi:tw=0 syntax=perl:
+# vi:set filetype=perl:
 
-package Games::RolePlay::MapGen::Exporter::BasicImage;
+package Games::RolePlay::MapGen::Exporter::SVG;
 
 use strict;
 use Carp;
-use GD;
+use Games::RolePlay::MapGen::Exporter::SVG::_GDSVG;
 use Math::Trig qw(deg2rad);
 
 1;
@@ -32,7 +32,7 @@ sub go {
     my $map = $this->genmap($opts);
     unless( $opts->{fname} eq "-retonly" ) {
         open _MAP_OUT, ">$opts->{fname}" or die "ERROR: couldn't open $opts->{fname} for write: $!";
-        print _MAP_OUT $map->png; # the format should really be an option... at some point
+        print _MAP_OUT $map->svg; # the format should really be an option... at some point
         close _MAP_OUT;
     }
 
@@ -60,7 +60,7 @@ sub genmap {
 
     $this->gen_cell_size($opts);
 
-    my $gd    = new GD::Image(1+($opts->{x_size} * @{$map->[0]}), 1+($opts->{y_size} * @$map));
+    my $gd     = new Games::RolePlay::MapGen::Exporter::SVG::_GDSVG(1+($opts->{x_size} * @{$map->[0]}), 1+($opts->{y_size} * @$map));
 
     my $white  = $gd->colorAllocate(0xff, 0xff, 0xff);
     my $black  = $gd->colorAllocate(0x00, 0x00, 0x00);
@@ -78,6 +78,7 @@ sub genmap {
     my $door_arc_color     = $lgrey;
     my $door_color         = $brown;
     my $wall_color         = $black;
+    my $fog_tile_color     = $lgrey;  # fog-tile color
     my $wall_tile_color    = $dgrey;  # wall-tile color
     my $corridor_color     = $white;  # corridor-tile color
     my $open_color1        = $elgrey; # tile edges
@@ -101,7 +102,23 @@ sub genmap {
     my $or = deg2rad( $do );
     my $sr = sin( $or ); # we'll be using this, kthx...
 
-    $gd->interlaced('true');
+    GRID: {
+        my $x = @{$map->[0]}*$opts->{x_size};
+        my $y;
+
+        for my $i (0 .. @$map) {
+            $y = $i*$opts->{y_size};
+
+            $gd->line( (0, $y) => ($x, $y) => $wall_color );
+        }
+
+        $y = @$map*$opts->{y_size};
+        for my $i (0 .. @{$map->[0]}) {
+            $x = $i*$opts->{x_size};
+
+            my $r = $gd->line( ($x, 0) => ($x, $y) => $wall_color );
+        }
+    }
 
     for my $i (0 .. $#$map) {
         my $jend = $#{$map->[$i]};
@@ -122,14 +139,7 @@ sub genmap {
 
             $opts->{t_cb}->() if exists $opts->{t_cb};
 
-            $gd->line( $xp, $yp => $Xp, $yp, $wall_color );
-            $gd->line( $xp, $Yp => $Xp, $Yp, $wall_color );
-            $gd->line( $Xp, $yp => $Xp, $Yp, $wall_color );
-            $gd->line( $xp, $yp => $xp, $Yp, $wall_color );
-
             $gd->line( $xp+$L, $yp     => $Xp-$L, $yp,    $open_color1 ) if $t->{od}{n} == 1; # == 1 doesn't match doors...
-            $gd->line( $xp+$L, $Yp     => $Xp-$L, $Yp,    $open_color1 ) if $t->{od}{s} == 1;
-            $gd->line( $Xp,    $yp+$L, => $Xp,    $Yp-$L, $open_color1 ) if $t->{od}{e} == 1;
             $gd->line( $xp,    $yp+$L, => $xp,    $Yp-$L, $open_color1 ) if $t->{od}{w} == 1;
 
             if( $t->{od}{n} == 1 and $t->{od}{w} == 1 ) { # == 1 doesn't match doors
@@ -141,24 +151,34 @@ sub genmap {
 
             if( not $t->{type} ) {
                 $gd->filledRectangle( $xp+$B, $yp+$B => $Xp-$B, $Yp-$B, $wall_tile_color );
-            }
-            elsif( $t->{type} eq "corridor" ) {
+
+            } elsif( $t->{type} eq "fog" ) {
+                my ($_xm, $_ym) = (0,0);
+                my ($_Xm, $_Ym) = (0,0);
+
+                $_xm -- if (my $wf = ($t->{nb}{w}{type} and $t->{nb}{w}{type} eq "fog"));
+                $_ym -- if (my $nf = ($t->{nb}{n}{type} and $t->{nb}{n}{type} eq "fog"));
+                            my $ef = ($t->{nb}{e}{type} and $t->{nb}{e}{type} eq "fog");
+                            my $sf = ($t->{nb}{s}{type} and $t->{nb}{s}{type} eq "fog");
+
+                $_xm += 3 if not $wf and $t->{od}{w};
+                $_ym += 3 if not $nf and $t->{od}{n};
+                $_Xm -= 3 if not $ef and $t->{od}{e};
+                $_Ym -= 3 if not $sf and $t->{od}{s};
+
+                $gd->filledRectangle( $xp+$B+$_xm, $yp+$B+$_ym => $Xp-$B+$_Xm, $Yp-$B+$_Ym, $fog_tile_color );
+
+            } elsif( $t->{type} eq "corridor" and $corridor_color != $white ) {
                 $gd->filledRectangle( $xp+$B, $yp+$B => $Xp-$B, $Yp-$B, $corridor_color );
             }
 
-            for my $dir (qw(n s e w)) {
+            # NOTE: we never need to draw s and e doors, that just duplicates efforts
+            for my $dir (qw(n w)) {
                 if( ref(my $door = $t->{od}{$dir}) ) {
-                    my @q1 = ( $dir eq "n" ? ($xp+$dM, $yp-$dm) :
-                               $dir eq "s" ? ($xp+$dM, $Yp-$dm) :
-                               $dir eq "e" ? ($Xp-$dm, $yp+$dM) :
-                                             ($xp-$dm, $yp+$dM) );
+                    my @q1 = ( $dir eq "n" ? ($xp+$dM, $yp-$dm) : ($xp-$dm, $yp+$dM) );
+                    my @q2 = ( $dir eq "n" ? ($Xp-$dM, $yp+$dm) : ($xp+$dm, $Yp-$dM) );
 
-                    my @q2 = ( $dir eq "n" ? ($Xp-$dM, $yp+$dm) :
-                               $dir eq "s" ? ($Xp-$dM, $Yp+$dm) :
-                               $dir eq "e" ? ($Xp+$dm, $Yp-$dM) :
-                                             ($xp+$dm, $Yp-$dM) );
-
-                    unless( $door->{secret} ) {
+                    if( not $door->{secret} and not $door->{'open'} ) {
                         # Regular old unlocked, open, unstock, unhidden doors are these cute little rectangles.
 
                         $gd->filledRectangle( @q1 => @q2, $door_color );
@@ -170,6 +190,7 @@ sub genmap {
 
                     # Here, we draw the diagonal line and arc indicating how the door opens.
                     my $oi = "$dir$door->{open_dir}{major}$door->{open_dir}{minor}";
+
                     # draw the door line/arcs ... sadly, this is a 8 part if-else block {{{
                     if( $oi eq "nne" ) {  # same as above, but $Yp changes to $yp
                         $gd->arc(  $Xp-$dM, $yp-$am, $wx, $wy, 180, 180+$oa, $door_arc_color );
@@ -272,29 +293,15 @@ sub genmap {
 
                     unless( $door->{'open'} ) {
                         if( $door->{locked} ) {
-                            my @l1 = ( $dir eq "n" ? ($xp+$sM, $yp-$sm) :
-                                       $dir eq "s" ? ($xp+$sM, $Yp-$sm) :
-                                       $dir eq "e" ? ($Xp-$sm, $yp+$sM) :
-                                                     ($xp-$sm, $yp+$sM) );
-
-                            my @l2 = ( $dir eq "n" ? ($xp+$sM, $yp+$sm) :
-                                       $dir eq "s" ? ($xp+$sM, $Yp+$sm) :
-                                       $dir eq "e" ? ($Xp+$sm, $yp+$sM) :
-                                                     ($xp+$sm, $yp+$sM) );
+                            my @l1 = ( $dir eq "n" ? ($xp+$sM, $yp-$sm) : ($xp-$sm, $yp+$sM) );
+                            my @l2 = ( $dir eq "n" ? ($xp+$sM, $yp+$sm) : ($xp+$sm, $yp+$sM) );
 
                             $gd->line( @l1 => @l2 => $red );
                         }
 
                         if( $door->{stuck} ) {
-                            my @l1 = ( $dir eq "n" ? ($Xp-$sM, $yp-$sm) :
-                                       $dir eq "s" ? ($Xp-$sM, $Yp-$sm) :
-                                       $dir eq "e" ? ($Xp-$sm, $Yp-$sM) :
-                                                     ($xp-$sm, $Yp-$sM) );
-
-                            my @l2 = ( $dir eq "n" ? ($Xp-$sM, $yp+$sm) :
-                                       $dir eq "s" ? ($Xp-$sM, $Yp+$sm) :
-                                       $dir eq "e" ? ($Xp+$sm, $Yp-$sM) :
-                                                     ($xp+$sm, $Yp-$sM) );
+                            my @l1 = ( $dir eq "n" ? ($Xp-$sM, $yp-$sm) : ($xp-$sm, $Yp-$sM) );
+                            my @l2 = ( $dir eq "n" ? ($Xp-$sM, $yp+$sm) : ($xp+$sm, $Yp-$sM) );
 
                             $gd->line( @l1 => @l2 => $blue );
                         }
@@ -337,7 +344,7 @@ __END__
 
 =head1 NAME
 
-Games::RolePlay::MapGen::Exporter::BasicImage - A pure text mapgen exporter.
+Games::RolePlay::MapGen::Exporter::SVG - A pure text mapgen exporter.
 
 =head1 SYNOPSIS
 
