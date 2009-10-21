@@ -31,6 +31,8 @@ WriteMakefile(
         # These are just for t/05_export.t
         'File::Slurp'     => 0, # <-- this, I could just as well have used ``...
         'Algorithm::Diff' => 0, # <-- this is used automatcially by the test harness
+
+        'Data::Dumper' => 0, # required for testing, got some FAIL reports because this wasn't here.
     },
 
     ($ExtUtils::MakeMaker::VERSION ge '6.48'? 
@@ -38,11 +40,11 @@ WriteMakefile(
             META_MERGE => {
                 keywords => ['map','editor','visicalc', 'grm'],
                 resources=> {
-                    repository => 'http://github.com/jettero/grm/tree',
+                    repository => 'http://github.com/jettero/grm/',
                 },
             },
 
-        LICENSE	=> 'lgpl2',
+        LICENSE	=> 'LGPL',
     ) : ()),
 
     OBJECT => "mq.o",
