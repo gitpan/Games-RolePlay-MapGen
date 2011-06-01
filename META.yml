@@ -1,9 +1,9 @@
 --- #YAML:1.0
 name:               Games-RolePlay-MapGen
-version:            1.4002
+version:            1.4003
 abstract:           ~
 author:  []
-license:            LGPL
+license:            lgpl2
 distribution_type:  module
 configure_requires:
     ExtUtils::MakeMaker:  0
@@ -32,12 +32,12 @@ requires:
     XML::Simple:          0
     XML::XPath:           0
 resources:
-    repository:  http://github.com/jettero/grm/
+    repository:  http://github.com/jettero/grm/tree
 no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.54
+generated_by:       ExtUtils::MakeMaker version 6.56
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4

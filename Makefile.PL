@@ -40,11 +40,11 @@ WriteMakefile(
             META_MERGE => {
                 keywords => ['map','editor','visicalc', 'grm'],
                 resources=> {
-                    repository => 'http://github.com/jettero/grm/',
+                    repository => 'http://github.com/jettero/grm/tree',
                 },
             },
 
-        LICENSE	=> 'LGPL',
+        LICENSE	=> 'lgpl2',
     ) : ()),
 
     OBJECT => "mq.o",
