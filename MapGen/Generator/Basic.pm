@@ -2,9 +2,9 @@
 
 package Games::RolePlay::MapGen::Generator::Basic;
 
-use strict;
+use common::sense;
 use Carp;
-use base qw(Games::RolePlay::MapGen::Generator::SparseAndLoops);
+use parent q(Games::RolePlay::MapGen::Generator::SparseAndLoops);
 use Games::RolePlay::MapGen::Tools qw( choice roll _group irange str_eval );
 
 1;
@@ -119,7 +119,7 @@ sub drop_rooms {
     $opts->{y_size} = $#$map;
     $opts->{x_size} = $#{ $map->[0] };
 
-    for my $rn (1 .. &str_eval( $opts->{num_rooms} )) {
+    for my $rn (1 .. str_eval( $opts->{num_rooms} )) {
         my @size    = $this->gen_room_size( $opts );
            $size[0] = $opts->{x_size} if $size[0] > $opts->{x_size};
            $size[1] = $opts->{y_size} if $size[1] > $opts->{y_size};
@@ -191,7 +191,7 @@ sub drop_rooms {
            }
         }
 
-        if( my $loc = &choice( @possible_locs ) ) {
+        if( my $loc = choice( @possible_locs ) ) {
             my @corridors = ();
 
             pop @$loc; # ditch the score.
@@ -317,7 +317,7 @@ sub cleanup_pseudo_rooms {
 # genmap {{{
 sub genmap {
     my $this = shift;
-    my $opts = $this->gen_opts;
+    my $opts = $this->gen_opts(%{ $_[0] });
     my ($map, $groups) = $this->SUPER::genmap(@_);
 
     # There are a few types of random corridors that look enough like rooms

@@ -1,3 +1,24 @@
+1.5006: Sat Dec 29 2012
+   - added some experimental things, maybe develop later,
+     maybe not
+   - added is_on_map(target) to mapqueue
+
+1.5005: Sun Jul 10 2011
+   - use common::sense and use parent
+   - no AutoLoader
+
+1.5003: Sun Jul 10 2011
+   - during a crash, DESTROY that uses eval screws up the error
+     that's propagating.  Localize $@ to be polite to users.
+
+1.5000: Wed Jun 01 2011
+   - load_map() and save_map() were using Data::Dumper rather
+     than the more obvious choice: Storable — fixed.  I'm not
+     aware of anyone using these functions, or indeed this entire
+     package, so if I broke something sorry, didn't mean it.
+     Look at legacy_load_map() if necessary.
+   - added freeze/thaw hooks to both MapGen and MapQueue
+
 1.4002: Wed Jun 01 2011
    - pure xml import (no file)
 

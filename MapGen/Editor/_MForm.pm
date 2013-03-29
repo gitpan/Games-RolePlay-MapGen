@@ -9,13 +9,13 @@
 
 package Games::RolePlay::MapGen::Editor::_MForm;
 
-use strict;
+use common::sense;
 use Gtk2;
 use Gtk2::SimpleList;
 use Glib qw(TRUE FALSE);
 use Data::Dump qw(dump);
 
-use base 'Exporter';
+use parent 'Exporter';
 our @EXPORT_OK = qw(make_form $default_restore_defaults);
 our $default_restore_defaults = sub {
         my ($button, $reref) = @_;

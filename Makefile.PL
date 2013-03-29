@@ -33,6 +33,10 @@ WriteMakefile(
         'Algorithm::Diff' => 0, # <-- this is used automatcially by the test harness
 
         'Data::Dumper' => 0, # required for testing, got some FAIL reports because this wasn't here.
+        Storable => 0,
+        Memoize => 0,
+        parent => 0,
+        'common::sense' => 0,
     },
 
     ($ExtUtils::MakeMaker::VERSION ge '6.48'? 
@@ -40,7 +44,7 @@ WriteMakefile(
             META_MERGE => {
                 keywords => ['map','editor','visicalc', 'grm'],
                 resources=> {
-                    repository => 'http://github.com/jettero/grm/tree',
+                    repository => 'https://github.com/jettero/grm',
                 },
             },
 

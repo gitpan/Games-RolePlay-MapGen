@@ -2,12 +2,13 @@
 
 package Games::RolePlay::MapGen::MapQueue;
 
-use strict;
+use common::sense;
 use Carp;
 use Exporter;
 use Math::Trig;
 use Math::Round;
 use List::Util qw(min max);
+use Storable qw(freeze thaw);
 use constant {
     LOS_NO              => 0,
     LOS_YES             => 1,
@@ -48,8 +49,6 @@ our @toflush = qw( _line_of_sight _tight_line_of_sight _ranged_cover _melee_cove
 
 use Games::RolePlay::MapGen;
 require XSLoader; XSLoader::load('Games::RolePlay::MapGen', $Games::RolePlay::MapGen::VERSION);
-
-1;
 
 # new {{{
 sub new {
@@ -1094,10 +1093,34 @@ sub closure_lline_of_sight {
 }
 # }}}
 
+# {{{ sub build_queue_from_hash
+
+##################
+# XXX: experimental, undocumented, crazy thing, do not use, may change
+######
+
+sub build_queue_from_hash {
+    my $this = shift;
+    my $that = @_==1 && ref($_[0])eq"HASH" ? $_[0] : { @_ };
+
+    delete $this->{l};
+    delete $this->{c};
+
+    for my $k (keys %$that) {
+        $this->{l} = $k;
+        my $loc = $that->{$k}{l};
+        my $itm = $that->{$k}{i};
+
+        push @{$this->{c}[ $loc->[1] ][ $loc->[0] ]}, $itm;
+    }
+}
+
+# }}}
+
 # add {{{
 sub add {
     my $this = shift;
-    my $that = shift; my $tag = "$that";
+    my $that = shift or croak "place what?"; my $tag = "$that";
     my @loc  = @_;
 
     croak "that object/tag ($tag) appears to already be on the map" if exists $this->{l}{$tag};
@@ -1131,6 +1154,15 @@ sub replace {
     $this->remove($tag) if exists $this->{l}{$tag};
     $this->add($that => @loc);
 }
+# }}}
+# {{{ is_on_map
+sub is_on_map {
+    my $this = shift;
+    my $that = shift;
+
+    return exists($this->{l}{$that}) ? 1:0;
+}
+
 # }}}
 
 # objs_at_location {{{
@@ -1198,6 +1230,7 @@ sub random_open_location {
     my @l    = $this->all_open_locations;
     my $i    = int rand int @l;
 
+    return unless @l;
     return (wantarray ? @{$l[$i]}:$l[$i]);
 }
 # }}}
@@ -1353,3 +1386,26 @@ sub map_domain {
     return $this->{ym};
 }
 # }}}
+
+# {{{ FREEZE_THAW_HOOKS
+FREEZE_THAW_HOOKS: {
+    my $going;
+    sub STORABLE_freeze {
+        return if $going;
+        my $this = shift;
+        $going = 1;
+        my $str = freeze($this);
+        $going = 0;
+        return $str;
+    }
+
+    sub STORABLE_thaw {
+        my $this = shift;
+        %$this = %{ thaw($_[1]) };
+        $this->retag;
+    }
+}
+
+# }}}
+
+1;

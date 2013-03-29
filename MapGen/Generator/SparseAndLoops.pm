@@ -2,9 +2,9 @@
 
 package Games::RolePlay::MapGen::Generator::SparseAndLoops;
 
-use strict;
+use common::sense;
 use Carp;
-use base qw(Games::RolePlay::MapGen::Generator::Perfect);
+use parent 'Games::RolePlay::MapGen::Generator::Perfect';
 use Games::RolePlay::MapGen::Tools qw( choice roll );
 
 1;

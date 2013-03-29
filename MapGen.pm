@@ -2,12 +2,11 @@
 
 package Games::RolePlay::MapGen;
 
-use strict;
-use AutoLoader;
 use Carp;
-use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::SortKeys = 1;
+use Storable;
+use common::sense;
 
-our $VERSION = 1.4003;
+our $VERSION = '1.5006';
 
 our $AUTOLOAD;
 
@@ -35,8 +34,6 @@ our %known_opts = (
 );
 # }}}
 
-1;
-
 # _check_mod_path {{{
 sub _check_mod_path  {
     my $this = shift;
@@ -58,7 +55,6 @@ sub _check_opts {
     my @e    = ();
 
     # warn "checking known_opts";
-    no strict 'refs';
     for my $k (keys %known_opts) {
         "set_$k"->($this, $known_opts{$k} ) unless defined $this->{$k};
     }
@@ -153,18 +149,39 @@ sub save_map {
 
     $this->{_the_map}->disconnect_map;
 
-    my @keys = keys %$this;
+    my $str;
+    if( $filename ) {
+        Storable::store($this, $filename);
 
-    open my $save, ">$filename" or croak "couldn't open $filename for write: $!";
-    print $save "#!/usr/bin/perl\n\n";
-    print $save Data::Dumper->Dump([map($this->{$_}, @keys)], [map("\$this\-\>{$_}", @keys)]);
-    close $save;
+    } else {
+        $str = Storable::freeze($this);
+    }
 
     $this->{_the_map}->interconnect_map;
+
+    return $str;
 }
 # }}}
 # load_map {{{
 sub load_map {
+    my $this     = shift;
+    my $filename = shift;
+
+    if( -f $filename ) {
+        eval { %$this = %{ Storable::retrieve( $filename ) } }
+            or die "ERROR while evaluating saved map from file: $@";
+
+    } else {
+        eval { %$this = %{ Storable::thaw( $filename ) } }
+            or die "ERROR while evaluating saved map from string: $@";
+    }
+
+    require Games::RolePlay::MapGen::Tools; # This would already be loaded if we were the blessed ref that did the saving
+    $this->{_the_map}->interconnect_map;    # bit it wouldn't be loaded otherwise!
+}
+# }}}
+# legacy_load_map {{{
+sub legacy_load_map {
     my $this     = shift;
     my $filename = shift;
 
@@ -302,5 +319,27 @@ sub size {
     return [$x, $y];
 }
 # }}}
+
+# {{{ FREEZE_THAW_HOOKS
+FREEZE_THAW_HOOKS: {
+    my $going;
+    sub STORABLE_freeze {
+        return if $going;
+        my $this = shift;
+        $going = 1;
+        my $str = $this->save_map;
+        $going = 0;
+        return $str;
+    }
+
+    sub STORABLE_thaw {
+        my $this = shift;
+        $this->load_map($_[1]);
+    }
+}
+
+# }}}
+
+1;
 
 __END__

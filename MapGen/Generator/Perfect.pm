@@ -2,9 +2,9 @@
 
 package Games::RolePlay::MapGen::Generator::Perfect;
 
-use strict;
+use common::sense;
 use Carp;
-use base qw(Games::RolePlay::MapGen::Generator);
+use parent q(Games::RolePlay::MapGen::Generator);
 use Games::RolePlay::MapGen::Tools qw( _group _tile choice roll );
 
 1;

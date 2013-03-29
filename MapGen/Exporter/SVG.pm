@@ -2,7 +2,7 @@
 
 package Games::RolePlay::MapGen::Exporter::SVG;
 
-use strict;
+use common::sense;
 use Carp;
 use Games::RolePlay::MapGen::Exporter::SVG::_GDSVG;
 use Math::Trig qw(deg2rad);
