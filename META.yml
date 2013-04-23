@@ -49,4 +49,4 @@ requires:
   perl: 5.008
 resources:
   repository: https://github.com/jettero/grm
-version: 1.5006
+version: 1.5008
